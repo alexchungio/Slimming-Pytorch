@@ -24,6 +24,7 @@ def get_model(args, cfg=None):
 
     return model
 
+
 if __name__ == "__main__":
 
     model = get_model(args)
