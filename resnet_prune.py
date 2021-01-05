@@ -82,10 +82,6 @@ def execute_pruned(pre_pruned_model, pruned_model, cfg_mask):
     :param cfg_mask:
     :return:
     """
-
-    if args.cuda:
-        pruned_model.cuda()
-
     old_modules = list(pre_pruned_model.modules())
     new_modules = list(pruned_model.modules())
 
@@ -193,13 +189,16 @@ def main():
 
     num_bn_channel, prune_threshold = get_bn_info(model)
 
+    # pre prune
     pre_pruned_model, cfg, cfg_mask, pruned_ratio = pre_prune(model, prune_threshold, total=num_bn_channel)
     acc = test(pre_pruned_model)
     print(cfg)
     print('Pre-processing Successful!')
 
-
+    # prune
     pruned_model = get_model(args, cfg=cfg)
+    if args.cuda:
+        pruned_model.cuda()
     print(pruned_model)
     num_parameters = sum([param.nelement() for param in pruned_model.parameters()])
     pruned_info = os.path.join(args.save, "prune.txt")
@@ -213,3 +212,7 @@ def main():
 
     pruned_acc = test(pruned_model)
     print(pruned_acc)
+
+
+if __name__ == "__main__":
+    main()

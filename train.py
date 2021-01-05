@@ -41,10 +41,10 @@ def update_bn(model):
     """
     for m in model.modules():
         if isinstance(m, nn.BatchNorm2d):
-            m.weight.grad.data.add_(args.s*torch.sign(m.weight.data))  # L1 regularization
+            m.weight.grad.add_(args.scale * torch.sign(m.weight.data))  # L1 regularization
 
 
-def train(model, epoch, data_loader, optimizer):
+def train(model, epoch, data_loader, optimizer, criterion):
     """
 
     :param model:
@@ -60,7 +60,7 @@ def train(model, epoch, data_loader, optimizer):
 
         output = model(data)
         optimizer.zero_grad()
-        loss = F.cross_entropy(output, target)
+        loss = criterion(output, target)
         # pred = output.data.max(1, keepdim=True)[1]
         loss.backward()
 
@@ -122,6 +122,7 @@ def main():
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
 
     # criterion
+    criterion = torch.nn.CrossEntropyLoss()
 
     # lr_scheduler
     milestones = [int(args.epochs * 0.5), int(args.epochs * 0.75)]
@@ -144,15 +145,17 @@ def main():
     best_acc = 0.
     for epoch in range(args.start_epoch, args.epochs):
 
-        train(model, epoch, train_loader, optimizer)
+        train(model, epoch, train_loader, optimizer, criterion)
         acc = test(model, epoch, test_loader)
         lr_scheduler.step()
         is_best = acc > best_acc
         best_acc = max(acc, best_acc)
         save_checkpoint(
             state={'epoch': epoch + 1,
-                  'state_dict': model.state_dict(),
-                  'best_acc': best_acc,
+                   'arch': args.arch,
+                   'depth': args.depth,
+                   'state_dict': model.state_dict(),
+                   'best_acc': best_acc,
                    'optimizer': optimizer.state_dict(),},
             is_best=is_best,
             filepath=args.checkpoint)

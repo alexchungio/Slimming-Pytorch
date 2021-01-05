@@ -1,12 +1,12 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 #------------------------------------------------------
-# @ File       : vgg_prune.py
+# @ File       : densenet_prune.py
 # @ Description:  
 # @ Author     : Alex Chung
 # @ Contact    : yonganzhong@outlook.com
 # @ License    : Copyright (c) 2017-2018
-# @ Time       : 2021/1/5 下午7:33
+# @ Time       : 2021/1/5 下午8:13
 # @ Software   : PyCharm
 #-------------------------------------------------------
 
@@ -16,6 +16,7 @@ import argparse
 import torch
 import torch.nn as nn
 
+from models import channel_selection
 from data.dataset import get_dataset
 from tools import get_model
 from configs.cfgs import args
@@ -25,7 +26,6 @@ args.cuda = torch.cuda.is_available()
 
 
 def get_bn_info(model):
-
     # calculate number of bn
     num_bn_channel = 0
 
@@ -45,7 +45,7 @@ def get_bn_info(model):
     threshold_index = int(num_bn_channel * args.percent)
     prune_threshold = y[threshold_index]
 
-    return  num_bn_channel, prune_threshold
+    return num_bn_channel, prune_threshold
 
 
 def pre_prune(model, threshold, total):
@@ -80,37 +80,66 @@ def execute_pruned(pre_pruned_model, pruned_model, cfg_mask):
     :param cfg_mask:
     :return:
     """
+    old_modules = list(pre_pruned_model.modules())
+    new_modules = list(pruned_model.modules())
+
     layer_id_in_cfg = 0
     start_mask = torch.ones(3)
     end_mask = cfg_mask[layer_id_in_cfg]
-    for [m0, m1] in zip(pre_pruned_model.modules(), pruned_model.modules()):
+    first_conv = True
+
+    for layer_id in range(len(old_modules)):
+        m0 = old_modules[layer_id]
+        m1 = new_modules[layer_id]
         if isinstance(m0, nn.BatchNorm2d):
             idx1 = np.squeeze(np.argwhere(np.asarray(end_mask.cpu().numpy())))
             if idx1.size == 1:
                 idx1 = np.resize(idx1, (1,))
-            m1.weight.data = m0.weight.data[idx1.tolist()].clone()
-            m1.bias.data = m0.bias.data[idx1.tolist()].clone()
-            m1.running_mean = m0.running_mean[idx1.tolist()].clone()
-            m1.running_var = m0.running_var[idx1.tolist()].clone()
-            layer_id_in_cfg += 1
-            start_mask = end_mask.clone()
-            if layer_id_in_cfg < len(cfg_mask):  # do not change in Final FC
-                end_mask = cfg_mask[layer_id_in_cfg]
+
+            if isinstance(old_modules[layer_id + 1], channel_selection):
+                # If the next layer is the channel selection layer, then the current batch normalization layer won't be pruned.
+                m1.weight.data = m0.weight.data.clone()
+                m1.bias.data = m0.bias.data.clone()
+                m1.running_mean = m0.running_mean.clone()
+                m1.running_var = m0.running_var.clone()
+
+                # We need to set the mask parameter `indexes` for the channel selection layer.
+                m2 = new_modules[layer_id + 1]
+                m2.indexes.data.zero_()
+                m2.indexes.data[idx1.tolist()] = 1.0
+
+                layer_id_in_cfg += 1
+                start_mask = end_mask.clone()
+                if layer_id_in_cfg < len(cfg_mask):
+                    end_mask = cfg_mask[layer_id_in_cfg]
+                continue
+
         elif isinstance(m0, nn.Conv2d):
-            idx0 = np.squeeze(np.argwhere(np.asarray(start_mask.cpu().numpy())))
-            idx1 = np.squeeze(np.argwhere(np.asarray(end_mask.cpu().numpy())))
-            print('In shape: {:d}, Out shape {:d}.'.format(idx0.size, idx1.size))
-            if idx0.size == 1:
-                idx0 = np.resize(idx0, (1,))
-            if idx1.size == 1:
-                idx1 = np.resize(idx1, (1,))
-            w1 = m0.weight.data[:, idx0.tolist(), :, :].clone()
-            w1 = w1[idx1.tolist(), :, :, :].clone()
-            m1.weight.data = w1.clone()
+            if first_conv:
+                # We don't change the first convolution layer.
+                m1.weight.data = m0.weight.data.clone()
+                first_conv = False
+                continue
+            if isinstance(old_modules[layer_id - 1], channel_selection):
+                idx0 = np.squeeze(np.argwhere(np.asarray(start_mask.cpu().numpy())))
+                idx1 = np.squeeze(np.argwhere(np.asarray(end_mask.cpu().numpy())))
+                print('In shape: {:d}, Out shape {:d}.'.format(idx0.size, idx1.size))
+                if idx0.size == 1:
+                    idx0 = np.resize(idx0, (1,))
+                if idx1.size == 1:
+                    idx1 = np.resize(idx1, (1,))
+
+                # If the last layer is channel selection layer, then we don't change the number of output channels of the current
+                # convolutional layer.
+                w1 = m0.weight.data[:, idx0.tolist(), :, :].clone()
+                m1.weight.data = w1.clone()
+                continue
+
         elif isinstance(m0, nn.Linear):
             idx0 = np.squeeze(np.argwhere(np.asarray(start_mask.cpu().numpy())))
             if idx0.size == 1:
                 idx0 = np.resize(idx0, (1,))
+
             m1.weight.data = m0.weight.data[:, idx0].clone()
             m1.bias.data = m0.bias.data.clone()
 
@@ -128,7 +157,7 @@ def test(model):
         if args.cuda:
             data, target = data.cuda(), target.cuda()
         output = model(data)
-        pred = output.data.max(1, keepdim=True)[1] # get the index of the max log-probability
+        pred = output.data.max(1, keepdim=True)[1]  # get the index of the max log-probability
         correct += pred.eq(target.data.view_as(pred)).cpu().sum()
 
     print('\nTest set: Accuracy: {}/{} ({:.1f}%)\n'.format(
@@ -137,7 +166,6 @@ def test(model):
 
 
 def main():
-
     # load trained model
     model = get_model(args)
     if args.prune:
@@ -172,12 +200,16 @@ def main():
     num_parameters = sum([param.nelement() for param in pruned_model.parameters()])
     pruned_info = os.path.join(args.save, "prune.txt")
     with open(pruned_info, "w") as fp:
-        fp.write("Configuration: \n"+str(cfg)+"\n")
-        fp.write("Number of parameters: \n"+str(num_parameters)+"\n")
-        fp.write("Test accuracy: \n"+str(acc))
+        fp.write("Configuration: \n" + str(cfg) + "\n")
+        fp.write("Number of parameters: \n" + str(num_parameters) + "\n")
+        fp.write("Test accuracy: \n" + str(acc))
 
     pruned_model = execute_pruned(pre_pruned_model, pruned_model, cfg_mask)
     torch.save({'cfg': cfg, 'state_dict': pruned_model.state_dict()}, os.path.join(args.checkpoint, 'pruned.pth.tar'))
 
     pruned_acc = test(pruned_model)
     print(pruned_acc)
+
+
+if __name__ == "__main__":
+    main()
