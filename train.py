@@ -12,22 +12,20 @@
 from __future__ import print_function
 
 import os
-import argparse
-import shutil
-import numpy as np
+
 import torch
 import torch.utils.data as data
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from torchvision import datasets, transforms
+
 
 from tools import get_model, save_checkpoint
 from configs.cfgs import args
 from data.dataset import get_dataset
 
 
-args.use_cuda = True if torch.cuda.is_available() else False
+args.cuda = True if torch.cuda.is_available() else False
 
 if args.cuda:
     torch.cuda.manual_seed(args.seed)
@@ -60,8 +58,8 @@ def train(model, epoch, data_loader, optimizer):
         if args.cuda:
             data, target = data.cuda(), target.cuda()
 
-        optimizer.zero_grad()
         output = model(data)
+        optimizer.zero_grad()
         loss = F.cross_entropy(output, target)
         # pred = output.data.max(1, keepdim=True)[1]
         loss.backward()
@@ -126,7 +124,7 @@ def main():
     # criterion
 
     # lr_scheduler
-    milestones = [args.epochs * 0.5, args.epochs * 0.75]
+    milestones = [int(args.epochs * 0.5), int(args.epochs * 0.75)]
     lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer=optimizer, milestones=milestones, gamma=0.1)
 
     # resume
@@ -142,9 +140,6 @@ def main():
                   .format(args.resume, checkpoint['epoch'], best_prec1))
         else:
             print("=> no checkpoint found at '{}'".format(args.resume))
-
-    # get model
-    model = get_model(args)
 
     best_acc = 0.
     for epoch in range(args.start_epoch, args.epochs):
