@@ -10,7 +10,10 @@
 # @ Software   : PyCharm
 #------------------------------------------------------
 
+import os
 import torch
+import shutil
+
 import models
 from configs.cfgs import args
 
@@ -24,6 +27,11 @@ def get_model(args, cfg=None):
 
     return model
 
+
+def save_checkpoint(state, is_best, filepath):
+    torch.save(state, os.path.join(filepath, 'checkpoint.pth.tar'))
+    if is_best:
+        shutil.copyfile(os.path.join(filepath, 'checkpoint.pth.tar'), os.path.join(filepath, 'model_best.pth.tar'))
 
 if __name__ == "__main__":
 
