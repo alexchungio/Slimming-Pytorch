@@ -57,7 +57,7 @@ def pre_prune(model, threshold, total):
         if isinstance(m, nn.BatchNorm2d):
             weight_copy = m.weight.data.abs().clone()
             mask = weight_copy.gt(threshold).float().cuda()
-            pruned = pruned + mask.shape[0] - torch.sum(mask)
+            pruned = pruned + mask.shape[0] - torch.sum(mask) # count pruned
             m.weight.data.mul_(mask)
             m.bias.data.mul_(mask)
             cfg.append(int(torch.sum(mask)))
@@ -141,20 +141,23 @@ def main():
     # load trained model
     model = get_model(args)
     if args.prune:
-        if os.path.isfile(args.model):
-            print("=> loading checkpoint '{}'".format(args.model))
+        if os.path.isfile(args.prune):
+            print("=> loading checkpoint '{}'".format(args.prune))
             checkpoint = torch.load(args.prune)
             args.arch = checkpoint['arch']
             args.depth = checkpoint['depth']
 
             args.start_epoch = checkpoint['epoch']
             best_acc = checkpoint['best_acc']
-            model = get_model(best_acc)
+            model = get_model(args)
             model.load_state_dict(checkpoint['state_dict'])
             print("=> loaded checkpoint '{}' (epoch {}) Acc: {:f}"
-                  .format(args.model, checkpoint['epoch'], best_acc))
+                  .format(args.prune, checkpoint['epoch'], best_acc))
         else:
-            print("=> no checkpoint found at '{}'".format(args.model))
+            print("=> no checkpoint found at '{}'".format(args.prune))
+
+    if args.cuda:
+        model.cuda()
 
     num_bn_channel, prune_threshold = get_bn_info(model)
 
@@ -170,7 +173,7 @@ def main():
         pruned_model.cuda()
     print(pruned_model)
     num_parameters = sum([param.nelement() for param in pruned_model.parameters()])
-    pruned_info = os.path.join(args.save, "prune.txt")
+    pruned_info = os.path.join(args.checkpoint, "prune.txt")
     with open(pruned_info, "w") as fp:
         fp.write("Configuration: \n"+str(cfg)+"\n")
         fp.write("Number of parameters: \n"+str(num_parameters)+"\n")
@@ -181,3 +184,8 @@ def main():
 
     pruned_acc = test(pruned_model)
     print(pruned_acc)
+
+
+if __name__ == "__main__":
+    args.prune = os.path.join(args.checkpoint, 'model_best.pth.tar')
+    main()

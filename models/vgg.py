@@ -66,8 +66,14 @@ class vgg(nn.Module):
                 m.weight.data.normal_(0, 0.01)
                 m.bias.data.zero_()
 
-if __name__ == '__main__':
+
+def main():
+
     net = vgg()
     x = torch.FloatTensor(16, 3, 40, 40)
     y = net(x)
     print(y.data.shape)
+
+
+if __name__ == '__main__':
+    main()

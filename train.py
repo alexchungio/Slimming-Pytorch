@@ -164,4 +164,5 @@ def main():
 
 
 if __name__ == "__main__":
+    args.refine = os.path.join(args.checkpoint, 'pruned.pth.tar')
     main()
